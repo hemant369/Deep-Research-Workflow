@@ -1,0 +1,6 @@
+venv/
+build/
+
+# Python bytecode
+*.pyc
+__pycache__/
