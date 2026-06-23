@@ -8,6 +8,7 @@ class CodingAgent(BaseAgent):
         self.mcp_client = MCPClient()
 
     async def search(self, query: str):
+        print(f"CodingAgent -> {query}")
         results = await self.mcp_client.call_tool(
             "github_search",
             {

@@ -7,6 +7,7 @@ class GeneralAgent(BaseAgent):
         self.mcp_client = MCPClient()
 
     async def search(self, query: str):
+        print(f"GenerallAgent -> {query}")
         results = await self.mcp_client.call_tool(
             "web_search",
             {

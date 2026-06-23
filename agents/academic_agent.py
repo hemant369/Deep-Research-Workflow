@@ -7,6 +7,7 @@ class AcademicAgent(BaseAgent):
         self.mcp_client = MCPClient()
     
     async def search(self, query: str):
+        print(f"AcademicAgent -> {query}")
         results = await self.mcp_client.call_tool(
             "arxiv_search",
             {
