@@ -5,22 +5,38 @@ class PlannerAgent:
 
     def generate_sub_question(self, query):
 
-        prompt = f"""You are a research planning assistant.
+        prompt = f"""You are an expert research planning assistant.
+        Your job is to decompose a user's research query into 3–5 independent SEARCH QUERIES
+        that will be sent directly to academic search engines, GitHub search, and web search.
 
-        Given a research query, decompose it into focused sub-questions that can be 
-        independently searched across academic papers, code repositories, and the web.
+        Query:
+        {query}
 
-        Query: {query}
+        Step 1 — Identify the primary intent:
+        Definition | Comparison | Survey | Tutorial | Implementation |
+        Evaluation | Troubleshooting | Future Trends | Mixed
+
+        Step 2 — Generate 3–5 search queries.
 
         Rules:
-        1. Generate 3 to 5 sub-questions — no more, no less.
-        2. Each sub-question must be self-contained and searchable on its own.
-        3. Cover different angles: definitions, comparisons, implementations, limitations, recent developments.
-        4. Do NOT repeat or rephrase the original query as a sub-question.
-        5. Do NOT add explanations or commentary.
-        6. Return ONLY a valid JSON array of strings.
+        - Each search query must be directly usable in arXiv, GitHub, or a web search.
+        - Use concise keyword-based phrasing instead of conversational questions.
+        - Remove filler words such as "what", "how", "can you", "please", "examples of".
+        - Keep each query under 10 words.
+        - Include important technical terms.
+        - Each query should explore a different aspect of the original query.
+        - Do not repeat information.
 
-        Return the sub-questions as a JSON array."""
+        Output ONLY valid JSON:
+        {{
+            "intent": "<detected intent>",
+            "questions": [
+                "<search query 1>",
+                "<search query 2>",
+                "<search query 3>"
+            ]
+        }}
+        """
 
         response = llm.invoke(prompt)
         content = response.content

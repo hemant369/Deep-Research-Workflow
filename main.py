@@ -8,19 +8,12 @@ async def main():
     print("\n" + "=" * 80)
 
     query = input("Enter your research query: ")
-    result = await graph.ainvoke({
-        "query": query,
-        "sub_questions": [],
-        "academic_questions": [],
-        "general_questions": [],
-        "coding_questions": [],
-        "academic_results": [],
-        "general_results": [],
-        "coding_results": [],
-        "results": [],
-        "synthesized_text": "",
-        "report": ""
-    })
+    
+    result = await graph.ainvoke(
+        {
+        "query": query
+        }
+    )
 
     print("\n" + "=" * 80)
     print(result["report"])

@@ -1,29 +1,23 @@
-from typing import TypedDict, NotRequired, Annotated
-import operator
+from typing import TypedDict
 
-class ResearchState(TypedDict):
-    # Core
+class ResearchState(TypedDict, total=False):
     query: str
 
-    # Memory
-    memory_hit:   NotRequired[bool]
-    past_report:  NotRequired[str]
-    past_sources: NotRequired[list]
+    sub_questions: list[str]
 
-    # Planner
-    sub_questions: NotRequired[list]
+    academic_questions: list[str]
+    general_questions: list[str]
+    coding_questions: list[str]
 
-    # Router
-    academic_questions: list
-    general_questions:  list
-    coding_questions:   list
+    academic_results: list
+    general_results: list
+    coding_results: list
 
-    # Agent results
-    academic_results: Annotated[list, operator.add]
-    general_results:  Annotated[list, operator.add]
-    coding_results:   Annotated[list, operator.add]
+    results: list
 
-    # Pipeline
-    results:          list
     synthesized_text: str
-    report:           str
+    report: str
+
+    memory_hit: bool
+    past_report: str
+    past_sources: list

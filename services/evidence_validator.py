@@ -1,3 +1,6 @@
+from model.llm import llm
+
+
 class EvidenceValidator:
     DOMAIN_SCORES = {
         "arxiv.org": 0.95,
@@ -20,27 +23,77 @@ class EvidenceValidator:
     }
 
     DEFAULT_SCORE = 0.55
-    THRESHOLD = 0.70
+    THRESHOLD = 0.75
 
     def _domain_score(self, url: str) -> float:
         for domain, score in self.DOMAIN_SCORES.items():
-            if domain in url:
+            if domain in url.lower():
                 return score
         return self.DEFAULT_SCORE
 
     def _content_bonus(self, text: str) -> float:
         length = len(text)
-        if length > 1000:
+
+        if length > 3000:
             return 0.10
-        if length > 500:
+        elif length > 1500:
+            return 0.08
+        elif length > 800:
             return 0.05
+        elif length > 300:
+            return 0.02
+
         return 0.0
 
     def _title_bonus(self, title: str) -> float:
-        return 0.03 if title else 0.0
+        return 0.03 if title.strip() else 0.0
 
-    def execute(self, results: list) -> list:
+    def _relevance_bonus(self, query: str, item: dict) -> float:
+        title = item.get("title", "")
+        body = item.get("body", "") or item.get("content", "")
+
+        # Prevent sending huge documents
+        body = body[:1500]
+
+        prompt = f"""
+        You are evaluating whether a piece of evidence is useful for answering a user's research question.
+
+        User Query:
+        {query}
+
+        Evidence Title:
+        {title}
+
+        Evidence:
+        {body}
+
+        Classify the evidence into ONLY one of:
+
+        Relevant
+        Partially Relevant
+        Irrelevant
+
+        Return ONLY one word.
+        """
+
+        try:
+            response = llm.invoke(prompt)
+            answer = str(response.content).strip().lower()
+
+            if "relevant" == answer:
+                return 0.10
+
+            if "partially" in answer:
+                return 0.05
+
+            return 0.0
+
+        except Exception:
+            return 0.0
+
+    def execute(self, query: str, results: list) -> list:
         validated = []
+
         for item in results:
             url = item.get("url", "")
             title = item.get("title", "")
@@ -49,11 +102,18 @@ class EvidenceValidator:
             score = self._domain_score(url)
             score += self._content_bonus(body)
             score += self._title_bonus(title)
+            score += self._relevance_bonus(query, item)
+
             score = min(score, 1.0)
 
             item["confidence"] = round(score, 2)
+
             if score >= self.THRESHOLD:
                 validated.append(item)
 
-        print(f"VALIDATOR: {len(results)} -> {len(validated)}")
+        print(
+            f"VALIDATOR: {len(results)} -> {len(validated)} "
+            f"(threshold={self.THRESHOLD})"
+        )
+
         return validated

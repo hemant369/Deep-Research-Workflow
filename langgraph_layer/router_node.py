@@ -34,8 +34,8 @@ async def router_node(state):
         2. Return ONLY a valid JSON array, no markdown, no explanation, no extra text.
         3. Output format:
         [
-            {{"question": "...", "categories": ["Academic"]}},
-            {{"question": "...", "categories": ["Academic", "Coding"]}}
+            {{"question": "...", "categories": ["Academic"], "priority": "Medium"}},
+            {{"question": "...", "categories": ["Academic", "Coding"], "priority": "High"}}
         ]
         """
 

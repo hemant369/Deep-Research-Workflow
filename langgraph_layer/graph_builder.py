@@ -11,7 +11,8 @@ from langgraph_layer.nodes import (
     synthesizer_node,
     writer_node,
     memory_load_node,
-    memory_save_node
+    memory_save_node,
+    memory_writer_node
 )
 from langgraph_layer.router_node import router_node
 
@@ -29,6 +30,7 @@ def build_graph():
 
     # ── Nodes ────────────────────────────────────────────
     graph.add_node("memory_load",  memory_load_node)
+    graph.add_node("memory_writer", memory_writer_node)
     graph.add_node("planner",      planner_node)
     graph.add_node("router",       router_node)
     graph.add_node("academic",     academic_node)
@@ -49,7 +51,7 @@ def build_graph():
         "memory_load",
         check_memory,
         {
-            "hit":  "memory_save",  # skip all agents
+            "hit":  "memory_writer",  # skip all agents
             "miss": "planner"       # run full research
         }
     )
@@ -72,6 +74,6 @@ def build_graph():
     graph.add_edge("writer",      "memory_save")
 
     # ── Exit ──────────────────────────────────────────────
-    graph.add_edge("memory_save", END)
+    graph.add_edge("memory_writer", END)
 
     return graph.compile()

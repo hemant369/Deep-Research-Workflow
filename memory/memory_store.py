@@ -1,6 +1,6 @@
 import json
 import chromadb
-from chromadb.utils import embedding_functions
+from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 
 class MemoryStore:
     def __init__(self):
