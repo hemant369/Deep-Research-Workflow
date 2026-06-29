@@ -1,0 +1,75 @@
+from langgraph.graph import END, START, StateGraph
+
+from backend.langgraph_layer.nodes import (
+    academic_node,
+    citation_node,
+    coding_node,
+    general_node,
+    memory_load_node,
+    memory_save_node,
+    memory_writer_node,
+    merge_node,
+    planner_node,
+    synthesizer_node,
+    validator_node,
+    writer_node,
+)
+from backend.langgraph_layer.router_node import router_node
+from backend.langgraph_layer.state import ResearchState
+
+
+def check_memory(state: ResearchState) -> str:
+    if state.get("memory_hit"):
+        print("Memory HIT -> skipping agents")
+        return "hit"
+    print("Memory MISS -> running full research")
+    return "miss"
+
+
+def build_graph():
+    graph = StateGraph(ResearchState)
+
+    graph.add_node("memory_load", memory_load_node)
+    graph.add_node("memory_writer", memory_writer_node)
+    graph.add_node("planner", planner_node)
+    graph.add_node("router", router_node)
+    graph.add_node("academic", academic_node)
+    graph.add_node("general", general_node)
+    graph.add_node("coding", coding_node)
+    graph.add_node("merge", merge_node)
+    graph.add_node("validator", validator_node)
+    graph.add_node("citation", citation_node)
+    graph.add_node("synthesizer", synthesizer_node)
+    graph.add_node("writer", writer_node)
+    graph.add_node("memory_save", memory_save_node)
+
+    graph.add_edge(START, "memory_load")
+
+    graph.add_conditional_edges(
+        "memory_load",
+        check_memory,
+        {
+            "hit": "memory_writer",
+            "miss": "planner",
+        },
+    )
+
+    graph.add_edge("planner", "router")
+    graph.add_edge("router", "academic")
+    graph.add_edge("router", "general")
+    graph.add_edge("router", "coding")
+
+    graph.add_edge("academic", "merge")
+    graph.add_edge("general", "merge")
+    graph.add_edge("coding", "merge")
+
+    graph.add_edge("merge", "validator")
+    graph.add_edge("validator", "citation")
+    graph.add_edge("citation", "synthesizer")
+    graph.add_edge("synthesizer", "writer")
+    graph.add_edge("writer", "memory_save")
+
+    graph.add_edge("memory_writer", END)
+    graph.add_edge("memory_save", END)
+
+    return graph.compile()

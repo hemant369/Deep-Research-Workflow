@@ -4,3 +4,15 @@ build/
 # Python bytecode
 *.pyc
 __pycache__/
+
+data/
+chroma
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+
+# Local env
+.env
