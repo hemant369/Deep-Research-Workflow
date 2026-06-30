@@ -325,7 +325,6 @@ export default function Home() {
             <div className="query-heading">
               <div>
                 <p className="eyebrow">New Research</p>
-                <h1>{queryTitle}</h1>
               </div>
               <span className="api-pill">{API_BASE}</span>
             </div>
@@ -447,11 +446,6 @@ function TopNav() {
         Research Workspace
         <span>v</span>
       </button>
-      <label className="global-search">
-        <span>Search</span>
-        <input placeholder="Global Search" />
-        <kbd>Ctrl K</kbd>
-      </label>
       <div className="nav-actions">
         <span className="avatar" aria-label="User avatar">H</span>
       </div>
@@ -581,7 +575,20 @@ function EvidenceCard({
       <div className="source-card-top">
         <span className="source-icon">{sourceIcon(source)}</span>
         <div>
-          <p className="source-title">{source.citation ?? ""} {source.title}</p>
+          <p className="source-title">
+            {source.citation ?? ""} {source.title}
+            {source.url && (
+              <a
+                href={source.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                style={{ marginLeft: '8px', fontSize: '12px', color: 'var(--primary)' }}
+              >
+                🔗
+              </a>
+            )}
+          </p>
           <div className="source-meta">{firstAuthor} <span>/</span> {yearMatch?.[0] ?? "n.d."} <span>/</span> {source.source}</div>
         </div>
         <span className={`confidence ${confidenceClass(confidence)}`}>{source.confidence ?? "n/a"}</span>
@@ -648,11 +655,31 @@ function SourceInspector({ source }: { source: EvidenceSource }) {
           </div>
           <div>
             <dt>Publication</dt>
-            <dd>{hostFromUrl(source.url)}</dd>
+            <dd>
+              {source.url ? (
+                <a href={source.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', textDecoration: 'underline' }}>
+                  {hostFromUrl(source.url)}
+                </a>
+              ) : (
+                hostFromUrl(source.url)
+              )}
+            </dd>
           </div>
           <div>
             <dt>Citation Used In</dt>
             <dd>{source.citation ?? "Pending"}</dd>
+          </div>
+          <div>
+            <dt>URL</dt>
+            <dd>
+              {source.url ? (
+                <a href={source.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--primary)', textDecoration: 'underline', wordBreak: 'break-all' }}>
+                  View Source
+                </a>
+              ) : (
+                "N/A"
+              )}
+            </dd>
           </div>
         </dl>
       </section>
