@@ -1,53 +1,23 @@
-from urllib.parse import urlparse
-import re
-from backend.schemas.tool_result import ToolResult
+from schemas.tool_result import ToolResult
 
-class MergeDedup:
-    def _normalize_url(self, url: str) -> str:
-        parsed = urlparse(url)
-        normalized = parsed.netloc + parsed.path.rstrip("/")
-        normalized = re.sub(r"v\d+$", "", normalized)
-        return normalized.lower()
 
-    def _normalize_text(self, text: str) -> str:
-        if not text:
-            return ""
-        text = text.lower().replace("\n", " ")
-        text = " ".join(text.split())
-        return text.strip()
+def result_key(result: ToolResult) -> str:
+    """Identity of a source: normalized URL, or title when no URL exists."""
+    url = result.get("url", "").strip().lower().rstrip("/")
+    return url or result.get("title", "").strip().lower()
 
-    def execute(self, results: list[ToolResult]) -> list[ToolResult]:
-        unique_results: list[ToolResult] = []
-        seen_urls, seen_titles, seen_bodies = set(), set(), set()
 
-        for item in results:
-            url = item.get("url", "")
-            title = self._normalize_text(item.get("title", ""))
-            body = self._normalize_text(
-                item.get("body", "")
-                or item.get("content", "")
-                or item.get("description", "")
-            )
+def remove_duplicates(results: list[ToolResult]) -> list[ToolResult]:
+    """Keep the first result for each URL, or title when no URL exists."""
+    unique_results: list[ToolResult] = []
+    seen: set[str] = set()
 
-            normalized_url = self._normalize_url(url) if url else ""
+    for result in results:
+        key = result_key(result)
+        if not key or key in seen:
+            continue
 
-            duplicate = (
-                (normalized_url and normalized_url in seen_urls)
-                or (title and title in seen_titles)
-                or (body and body in seen_bodies)
-            )
+        seen.add(key)
+        unique_results.append(result)
 
-            if duplicate:
-                continue
-
-            if normalized_url:
-                seen_urls.add(normalized_url)
-            if title:
-                seen_titles.add(title)
-            if body:
-                seen_bodies.add(body)
-
-            unique_results.append(item)
-
-        print(f"MERGE: {len(results)} -> {len(unique_results)}")
-        return unique_results
+    return unique_results

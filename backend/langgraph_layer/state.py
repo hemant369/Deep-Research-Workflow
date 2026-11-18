@@ -1,10 +1,28 @@
 from typing_extensions import TypedDict
-from backend.schemas.tool_result import ToolResult
+from schemas.tool_result import ToolResult
+
+
+class SearchError(TypedDict):
+    provider: str
+    query: str
+    message: str
+
+
+class ResearchRound(TypedDict):
+    round: int
+    queries: list[str]
+    new_sources: int
+    gaps: str
+
 
 class ResearchState(TypedDict, total=False):
     query: str
     use_memory: bool
+    status: str
+    fatal_error: str
 
+    routes: dict[str, list[str]]
+    plan: dict
     sub_questions: list[str]
 
     academic_questions: list[str]
@@ -15,11 +33,21 @@ class ResearchState(TypedDict, total=False):
     general_results: list[ToolResult]
     coding_results: list[ToolResult]
 
+    academic_errors: list[SearchError]
+    general_errors: list[SearchError]
+    coding_errors: list[SearchError]
+
+    search_errors: list[SearchError]
+    seen_urls: list[str]
+    new_results: list[ToolResult]
+    new_evidence_count: int
     results: list[ToolResult]
+
+    research_round: int
+    research_log: list[ResearchRound]
+    continue_research: bool
 
     synthesized_text: str
     report: str
 
     memory_hit: bool
-    past_report: str
-    past_sources: list

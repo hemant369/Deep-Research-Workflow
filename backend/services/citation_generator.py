@@ -1,6 +1,6 @@
 from urllib.parse import urlparse
 
-from backend.schemas.tool_result import ToolResult
+from schemas.tool_result import ToolResult
 
 
 class CitationGenerator:
@@ -32,5 +32,4 @@ class CitationGenerator:
             ]
             citations.append(item)
 
-        print(f"CITATIONS: {len(citations)}")
         return citations

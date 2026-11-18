@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Deep Research Agent",
-  description: "Research dashboard for LangGraph-powered evidence synthesis"
+  title: "Deep Research",
+  description: "Plan, approve, and run multi-round research with cited reports"
 };
 
 export default function RootLayout({

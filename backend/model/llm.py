@@ -1,8 +1,9 @@
 from langchain_ollama import ChatOllama
+from core.config import settings
 
 llm = ChatOllama(
-    model="qwen2.5:3b",
+    model=settings.ollama_model,
     temperature=0,
-    num_ctx=16000,
-    num_predict=4096,
+    num_ctx=settings.ollama_context_size,
+    num_predict=settings.ollama_max_tokens,
 )

@@ -1,220 +1,147 @@
 import json
+import logging
 import re
-from collections import Counter
 
-from backend.model.llm import llm
-from backend.schemas.tool_result import ToolResult
+from core.config import settings
+from model.llm import llm
+from schemas.tool_result import ToolResult
+
+
+logger = logging.getLogger(__name__)
+
+CONFIDENCE = {
+    "relevant": 0.9,
+    "partially relevant": 0.7,
+}
 
 
 class EvidenceValidator:
-    DOMAIN_SCORES = {
-        "arxiv.org": 0.95,
-        "pubmed.ncbi.nlm.nih.gov": 0.95,
-        "scholar.google.com": 0.95,
-        "github.com": 0.85,
-        "docs.python.org": 0.90,
-        "aws.amazon.com/documentation": 0.90,
-        "cloud.google.com/docs": 0.90,
-        "pytorch.org": 0.90,
-        "huggingface.co": 0.88,
-        "ibm.com": 0.88,
-        "coursera.org": 0.85,
-        "geeksforgeeks.org": 0.82,
-        "wikipedia.org": 0.80,
-        "stackoverflow.com": 0.75,
-        "towardsdatascience.com": 0.70,
-        "medium.com": 0.65,
-        "linkedin.com": 0.50,
-    }
-
-    DEFAULT_SCORE = 0.60
-    THRESHOLD = 0.65
-    STOPWORDS = {
-        "the", "and", "for", "with", "that", "this", "from", "what", "how",
-        "are", "can", "into", "about", "using", "use", "why", "when", "where",
-    }
-
-    def _domain_score(self, url: str) -> float:
-        for domain, score in self.DOMAIN_SCORES.items():
-            if domain in url.lower():
-                return score
-        return self.DEFAULT_SCORE
-
-    def _content_bonus(self, text: str) -> float:
-        length = len(text)
-
-        if length > 3000:
-            return 0.10
-        if length > 1500:
-            return 0.08
-        if length > 800:
-            return 0.05
-        if length > 300:
-            return 0.02
-
-        return 0.0
-
-    def _title_bonus(self, title: str) -> float:
-        return 0.03 if title.strip() else 0.0
-
     def _query_terms(self, query: str) -> set[str]:
-        terms = {
-            term
-            for term in re.findall(r"[a-zA-Z0-9][a-zA-Z0-9_-]{2,}", query.lower())
-            if term not in self.STOPWORDS
-        }
-        return terms
+        return {word for word in re.findall(r"\w+", query.lower()) if len(word) > 3}
 
-    def _split_passages(self, text: str) -> list[str]:
-        text = re.sub(r"\s+", " ", text).strip()
-        if not text:
-            return []
+    def _extract_passages(self, content: str, query: str = "", limit: int = 5) -> list[dict]:
+        """Split content into ~700-char passages and keep the ones most related to the query."""
+        sentences = re.split(r"(?<=[.!?])\s+", " ".join(content.split()))
+        passages: list[str] = []
+        current = ""
 
-        chunks = re.split(r"(?<=[.!?])\s+", text)
-        passages = []
-        current = []
-        current_len = 0
-
-        for chunk in chunks:
-            chunk = chunk.strip()
-            if not chunk:
-                continue
-
-            if current and current_len + len(chunk) > 700:
-                passages.append(" ".join(current))
-                current = []
-                current_len = 0
-
-            current.append(chunk)
-            current_len += len(chunk)
+        for sentence in sentences:
+            if len(current) + len(sentence) > 700 and current:
+                passages.append(current)
+                current = ""
+            current = f"{current} {sentence}".strip()
 
         if current:
-            passages.append(" ".join(current))
+            passages.append(current)
 
-        return passages
-
-    def _extract_passages(self, query: str, item: ToolResult, limit: int = 3) -> list[dict]:
-        body = item.get("content", "")
-        query_terms = self._query_terms(query)
-        passages = self._split_passages(body)
-
-        if not passages:
-            return []
-
-        scored = []
-        for passage in passages:
-            words = Counter(re.findall(r"[a-zA-Z0-9][a-zA-Z0-9_-]{2,}", passage.lower()))
-            overlap = sum(words.get(term, 0) for term in query_terms)
-            density = overlap / max(len(words), 1)
-            score = overlap + density
-            scored.append((score, passage))
-
-        scored.sort(key=lambda pair: pair[0], reverse=True)
-        selected = [passage for score, passage in scored[:limit] if score > 0]
-
-        if not selected:
-            selected = passages[:limit]
+        terms = self._query_terms(query)
+        scored = [
+            (sum(passage.lower().count(term) for term in terms), index)
+            for index, passage in enumerate(passages)
+        ]
+        best = sorted(scored, key=lambda pair: (-pair[0], pair[1]))[:limit]
+        selected = sorted(index for _, index in best)
 
         return [
-            {
-                "passage_id": "",
-                "text": passage[:900],
-            }
-            for passage in selected
+            {"passage_id": "", "text": passages[index]}
+            for index in selected
         ]
 
-    def _llm_assessment(self, query: str, item: ToolResult, passages: list[dict]) -> dict:
-        title = item.get("title", "")
-        passage_text = "\n\n".join(
-            f"- {passage['text']}"
-            for passage in passages
-        )[:3000]
+    def _parse_assessments(self, content: str) -> dict[int, dict]:
+        """Parse the model's JSON array, skipping malformed entries instead of failing."""
+        start, end = content.find("["), content.rfind("]")
+        if start == -1 or end <= start:
+            raise ValueError("Validator response contains no JSON array.")
 
-        prompt = f"""
-        You are validating whether evidence supports answering a research query.
+        data = json.loads(content[start:end + 1])
+        assessments: dict[int, dict] = {}
+        for item in data if isinstance(data, list) else []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                assessments[int(item["id"])] = item
+            except (KeyError, TypeError, ValueError):
+                continue
+        return assessments
 
-        Query:
-        {query}
-
-        Source title:
-        {title}
-
-        Candidate passages:
-        {passage_text}
-
-        Return ONLY valid JSON:
-        {{
-          "relevance": "Relevant | Partially Relevant | Irrelevant",
-          "support": "Strong | Moderate | Weak",
-          "key_claims": ["claim directly supported by the passages"],
-          "rationale": "short reason"
-        }}
-        """
-
-        try:
-            response = llm.invoke(prompt)
-            content = str(response.content).replace("```json", "").replace("```", "").strip()
-            data = json.loads(content)
-            if not isinstance(data, dict):
-                raise ValueError("Assessment was not an object.")
-            return data
-        except Exception:
-            return {
-                "relevance": "Partially Relevant" if passages else "Irrelevant",
-                "support": "Moderate" if passages else "Weak",
-                "key_claims": [],
-                "rationale": "Fallback assessment based on extracted passages.",
+    async def _assess_batch(
+        self,
+        query: str,
+        batch: list[tuple[int, ToolResult, list[dict]]],
+    ) -> dict[int, dict]:
+        candidates = [
+            {
+                "id": item_id,
+                "source": item.get("source", ""),
+                "title": item.get("title", ""),
+                "passages": [passage["text"] for passage in passages],
             }
+            for item_id, item, passages in batch
+        ]
 
-    def _assessment_bonus(self, assessment: dict) -> float:
-        relevance = str(assessment.get("relevance", "")).lower()
-        support = str(assessment.get("support", "")).lower()
+        prompt = f"""Judge whether each candidate source directly helps answer the research query.
 
-        bonus = 0.0
-        if relevance.startswith("relevant"):
-            bonus += 0.10
-        elif "partial" in relevance:
-            bonus += 0.05
+Query: {query}
+Sources: {json.dumps(candidates)[:40000]}
 
-        if support.startswith("strong"):
-            bonus += 0.08
-        elif support.startswith("moderate"):
-            bonus += 0.04
+Strict Filtering Rules:
+1. Mark a source "Irrelevant" if it is off-topic, about a homonym in another field (e.g. the TESLA particle accelerator instead of Tesla vehicles), or unrelated to the core subject of the query.
+2. Mark a source "Relevant" ONLY if it directly addresses both the main subject/entity and the technical topic of the query.
+3. Mark a source "Partially Relevant" ONLY if it provides directly applicable technical evidence for part of the query.
 
-        return bonus
+Return ONLY a JSON array containing one object per source ID:
+[
+  {{
+    "id": 0,
+    "relevance": "Relevant | Partially Relevant | Irrelevant",
+    "support": "Strong | Moderate | Weak",
+    "key_claims": ["claim"],
+    "rationale": "short explanation"
+  }}
+]
+"""
+        try:
+            response = await llm.ainvoke(prompt)
+            return self._parse_assessments(str(response.content))
+        except Exception:
+            logger.warning("Validator could not assess a batch.")
+            return {}
 
-    def execute(self, query: str, results: list[ToolResult]) -> list[ToolResult]:
+    async def execute(
+        self,
+        query: str,
+        results: list[ToolResult],
+    ) -> list[ToolResult]:
+        candidates = results[:settings.max_evidence_results]
+        prepared = [
+            (index, item, self._extract_passages(item.get("content", ""), query))
+            for index, item in enumerate(candidates)
+            if item.get("content", "").strip()
+        ]
+
+        assessments: dict[int, dict] = {}
+        for start in range(0, len(prepared), settings.validation_batch_size):
+            batch = prepared[start:start + settings.validation_batch_size]
+            assessments.update(await self._assess_batch(query, batch))
+
         validated: list[ToolResult] = []
+        for item_id, item, passages in prepared:
+            if not passages:
+                continue
 
-        for item in results:
-            url = item.get("url", "")
-            title = item.get("title", "")
-            body = item.get("content", "")
-            passages = self._extract_passages(query, item)
-            assessment = self._llm_assessment(query, item, passages)
+            assessment = assessments.get(item_id)
+            if not assessment:
+                continue
 
-            score = self._domain_score(url)
-            score += self._content_bonus(body)
-            score += self._title_bonus(title)
-            score += self._assessment_bonus(assessment)
-            score = min(score, 1.0)
+            relevance = str(assessment.get("relevance", "")).strip().lower()
+            confidence = CONFIDENCE.get(relevance)
+            if confidence is None:
+                continue
 
             metadata = item.setdefault("metadata", {})
-            metadata["validation"] = {
-                "relevance": assessment.get("relevance", ""),
-                "support": assessment.get("support", ""),
-                "key_claims": assessment.get("key_claims", []),
-                "rationale": assessment.get("rationale", ""),
-            }
+            metadata["validation"] = assessment
             metadata["passages"] = passages
-            item["confidence"] = round(score, 2)
-
-            if score >= self.THRESHOLD:
-                validated.append(item)
-
-        print(
-            f"VALIDATOR: {len(results)} -> {len(validated)} "
-            f"(threshold={self.THRESHOLD})"
-        )
+            item["confidence"] = confidence
+            validated.append(item)
 
         return validated

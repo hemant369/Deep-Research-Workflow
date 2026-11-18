@@ -5,14 +5,24 @@ build/
 *.pyc
 __pycache__/
 
+# Local data, ChromaDB stores, and binary/database files
 data/
-chroma
+chroma/
+*.bin
+*.sqlite3
+*.db
+
+# Markdown files
+*.md
 
 # Frontend
 frontend/node_modules/
 frontend/.next/
 frontend/out/
 frontend/.env.local
+frontend/tsconfig.tsbuildinfo
 
 # Local env
 .env
+.env.*
+!.env.example
