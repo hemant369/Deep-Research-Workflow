@@ -11,11 +11,11 @@ from langgraph_layer.nodes import (
     planner_node,
     reflect_node,
     reflect_route,
+    router_node,
     synthesizer_node,
     validator_node,
     writer_node,
 )
-from langgraph_layer.router_node import router_node
 from langgraph_layer.state import ResearchState
 
 

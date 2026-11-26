@@ -5,9 +5,11 @@ build/
 *.pyc
 __pycache__/
 
-# Local data, ChromaDB stores, and binary/database files
+# Local data, ChromaDB stores, logs, and binary/database files
 data/
 chroma/
+logs/
+*.log
 *.bin
 *.sqlite3
 *.db

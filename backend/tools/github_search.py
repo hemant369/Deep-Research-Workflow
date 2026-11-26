@@ -1,3 +1,5 @@
+import logging
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -6,6 +8,7 @@ from core.config import settings
 from schemas.tool_result import ToolResult, make_tool_result
 
 
+logger = logging.getLogger(__name__)
 MAX_README_REPOS = 2
 MAX_README_CHARS = 4000
 
@@ -29,6 +32,7 @@ def _fetch_readme(session: requests.Session, full_name: str, headers: dict[str, 
 
 
 def search_github(query: str) -> list[ToolResult]:
+    logger.info("GitHub search: %r", query)
     url = "https://api.github.com/search/repositories"
 
     params = {
@@ -81,4 +85,10 @@ def search_github(query: str) -> list[ToolResult]:
                 )
             )
 
+    logger.info(
+        "GitHub returned %d repo(s) (%d with README) for %r",
+        len(results),
+        sum(1 for item in results if item["metadata"].get("has_readme")),
+        query,
+    )
     return results

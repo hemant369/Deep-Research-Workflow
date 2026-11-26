@@ -1,3 +1,5 @@
+import logging
+import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing_extensions import TypedDict
@@ -62,4 +64,10 @@ def github_search(queries: list[str]) -> SearchBatch:
 
 
 if __name__ == "__main__":
+    # Never write logs to stdout: MCP stdio transport uses stdout for JSON-RPC frames.
+    logging.basicConfig(
+        stream=sys.stderr,
+        level=logging.INFO,
+        format="%(levelname)s [mcp] %(name)s: %(message)s",
+    )
     mcp.run(transport="stdio")

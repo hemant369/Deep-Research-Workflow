@@ -1,3 +1,4 @@
+import logging
 import re
 import arxiv
 
@@ -5,6 +6,7 @@ from core.config import settings
 from schemas.tool_result import ToolResult, make_tool_result
 
 
+logger = logging.getLogger(__name__)
 STOPWORDS = {"the", "and", "for", "with", "how", "what", "why", "does", "from", "into", "over"}
 
 
@@ -21,13 +23,15 @@ def _build_arxiv_query(query: str) -> str:
 
 def search_arxiv(query: str) -> list[ToolResult]:
     """Search arXiv and return paper abstracts."""
+    built = _build_arxiv_query(query)
+    logger.info("arXiv search: %s (built=%r)", query, built)
     search = arxiv.Search(
-        query=_build_arxiv_query(query),
+        query=built,
         max_results=settings.max_search_results,
         sort_by=arxiv.SortCriterion.Relevance,
     )
 
-    return [
+    papers = [
         make_tool_result(
             source="arxiv",
             title=paper.title,
@@ -43,3 +47,5 @@ def search_arxiv(query: str) -> list[ToolResult]:
         )
         for paper in arxiv.Client().results(search)
     ]
+    logger.info("arXiv returned %d paper(s) for %r", len(papers), query)
+    return papers

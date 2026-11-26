@@ -3,6 +3,7 @@ import logging
 import re
 
 from core.config import settings
+from core.run_logger import log_section
 from model.llm import llm
 from schemas.tool_result import ToolResult
 
@@ -15,9 +16,18 @@ CONFIDENCE = {
 }
 
 
+STOPWORDS = {
+    "the", "and", "for", "with", "how", "what", "why", "does", "from", "into",
+    "over", "vs", "are", "was", "were", "can", "use", "using", "about", "that", "this",
+}
+
+
 class EvidenceValidator:
     def _query_terms(self, query: str) -> set[str]:
-        return {word for word in re.findall(r"\w+", query.lower()) if len(word) > 3}
+        return {
+            word for word in re.findall(r"\w+", query.lower())
+            if len(word) >= 2 and word not in STOPWORDS
+        }
 
     def _extract_passages(self, content: str, query: str = "", limit: int = 5) -> list[dict]:
         """Split content into ~700-char passages and keep the ones most related to the query."""
@@ -112,7 +122,13 @@ Return ONLY a JSON array containing one object per source ID:
         query: str,
         results: list[ToolResult],
     ) -> list[ToolResult]:
-        candidates = results[:settings.max_evidence_results]
+        # Prefer full-content articles/papers over short search snippets when capping at max_evidence_results.
+        ordered = sorted(
+            results,
+            key=lambda item: len(item.get("content", "")) >= 400,
+            reverse=True,
+        )
+        candidates = ordered[:settings.max_evidence_results]
         prepared = [
             (index, item, self._extract_passages(item.get("content", ""), query))
             for index, item in enumerate(candidates)
@@ -125,17 +141,26 @@ Return ONLY a JSON array containing one object per source ID:
             assessments.update(await self._assess_batch(query, batch))
 
         validated: list[ToolResult] = []
+        decision_lines: list[str] = []
         for item_id, item, passages in prepared:
+            title = item.get("title", "Untitled")
+            url = item.get("url", "")
             if not passages:
+                decision_lines.append(f"DROPPED (no passages) | {title} | {url}")
                 continue
 
             assessment = assessments.get(item_id)
             if not assessment:
+                decision_lines.append(f"DROPPED (not assessed) | {title} | {url}")
                 continue
 
             relevance = str(assessment.get("relevance", "")).strip().lower()
             confidence = CONFIDENCE.get(relevance)
+            rationale = str(assessment.get("rationale", "")).strip()
             if confidence is None:
+                decision_lines.append(
+                    f"DROPPED ({assessment.get('relevance', 'Irrelevant')}) | {title} | {url} | {rationale}"
+                )
                 continue
 
             metadata = item.setdefault("metadata", {})
@@ -143,5 +168,17 @@ Return ONLY a JSON array containing one object per source ID:
             metadata["passages"] = passages
             item["confidence"] = confidence
             validated.append(item)
+            decision_lines.append(
+                f"KEPT ({assessment.get('relevance')}, support={assessment.get('support')}, "
+                f"conf={confidence}) | {title} | {url}\n  Rationale: {rationale}"
+            )
+
+        logger.info(
+            "Validator kept %d/%d candidate source(s).",
+            len(validated),
+            len(prepared),
+        )
+        if decision_lines:
+            log_section("VALIDATOR DECISIONS", "\n".join(decision_lines))
 
         return validated

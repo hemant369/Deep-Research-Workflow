@@ -6,6 +6,7 @@ from agents.planner_agent import PlannerAgent
 from agents.synthesizer_agent import SynthesizerAgent
 from agents.writer_agent import WriterAgent
 from core.config import settings
+from core.run_logger import format_json, log_section
 from langgraph_layer.state import ResearchState, SearchError
 from mcp_layer.client import MCPClient
 from memory.memory_store import memory
@@ -25,7 +26,6 @@ synthesizer = SynthesizerAgent()
 writer = WriterAgent()
 
 STOPPED = {"failed", "insufficient_evidence"}
-CITATION_PATTERN = re.compile(r"\[(\d+)(?:\.(\d+))?\](?!\()")
 
 
 def _flatten(routes: dict[str, list[str]]) -> list[str]:
@@ -41,6 +41,7 @@ async def _search(
         return [], []
 
     provider = tool_name.removesuffix("_search")
+    logger.info("NODE -> %s searching %s", tool_name, questions)
 
     try:
         results, raw_errors = await asyncio.wait_for(
@@ -48,10 +49,16 @@ async def _search(
             timeout=settings.search_timeout_seconds,
         )
     except Exception as exc:
+        message = str(exc) or type(exc).__name__
+        logger.warning("NODE -> %s failed: %s", tool_name, message)
+        log_section(
+            f"SEARCH ERROR ({tool_name})",
+            f"Queries: {questions}\nError: {message}",
+        )
         return [], [{
             "provider": provider,
             "query": ", ".join(questions),
-            "message": str(exc) or type(exc).__name__,
+            "message": message,
         }]
 
     errors: list[SearchError] = [
@@ -63,6 +70,30 @@ async def _search(
         for error in raw_errors
     ]
 
+    logger.info(
+        "NODE -> %s returned %d result(s), %d error(s)",
+        tool_name,
+        len(results),
+        len(errors),
+    )
+
+    lines = [f"Queries: {questions}", f"Results ({len(results)}):"]
+    for idx, item in enumerate(results, start=1):
+        meta = item.get("metadata", {})
+        extra = ""
+        if "full_page" in meta:
+            extra = f", full_page={meta['full_page']}"
+        elif "has_readme" in meta:
+            extra = f", has_readme={meta['has_readme']}"
+        lines.append(
+            f"  {idx}. [{item.get('source', provider)}] {item.get('title', 'Untitled')}\n"
+            f"     URL: {item.get('url', '')}\n"
+            f"     Content: {len(item.get('content', ''))} chars{extra}"
+        )
+    if errors:
+        lines.append(f"Errors ({len(errors)}):\n{format_json(errors)}")
+    log_section(f"MCP SEARCH ({tool_name})", "\n".join(lines))
+
     return results, errors
 
 
@@ -73,6 +104,10 @@ async def memory_load_node(state: ResearchState) -> dict:
 
     past = await asyncio.to_thread(memory.find, query)
     if past:
+        log_section(
+            "MEMORY HIT",
+            f"Served cached report from ChromaDB ({len(past['results'])} sources).\n\n{past['report']}",
+        )
         return {
             "memory_hit": True,
             "report": past["report"],
@@ -89,8 +124,12 @@ async def planner_node(state: ResearchState) -> dict:
     plan = state.get("plan")
     if plan and plan.get("steps"):
         routes = await planner.queries_from_plan(query, plan)
+        mode = "from approved plan"
     else:
         routes = await planner.create_search_queries(query)
+        mode = "autonomous"
+    logger.info("Planner routes (%s): %s", mode, routes)
+    log_section(f"PLANNER ({mode})", format_json(routes))
     return {
         "routes": routes,
         "sub_questions": _flatten(routes),
@@ -100,6 +139,16 @@ async def planner_node(state: ResearchState) -> dict:
         "seen_urls": [],
         "results": [],
         "status": "running",
+    }
+
+
+def router_node(state: ResearchState) -> dict:
+    """Pass the planner's per-source queries to the parallel search branches."""
+    routes = state.get("routes", {})
+    return {
+        "academic_questions": routes.get("academic", []),
+        "general_questions": routes.get("general", []),
+        "coding_questions": routes.get("coding", []),
     }
 
 
@@ -153,6 +202,18 @@ async def merge_node(state: ResearchState) -> dict:
             "status": "insufficient_evidence",
             "fatal_error": "No search results were found.",
         })
+    logger.info(
+        "Merge round %s: %d raw -> %d new unseen result(s)",
+        state.get("research_round", 1),
+        len(round_results),
+        len(new_results),
+    )
+    log_section(
+        f"MERGE (Round {state.get('research_round', 1)})",
+        f"Raw this round: {len(round_results)}\n"
+        f"New unseen    : {len(new_results)}\n"
+        f"Kept so far   : {len(state.get('results', []))}",
+    )
     return update
 
 
@@ -192,7 +253,15 @@ async def citation_node(state: ResearchState) -> dict:
     logger.info("NODE -> citation")
     if state.get("status") in STOPPED:
         return {}
-    return {"results": citation_generator.execute(state.get("results", []))}
+    cited = citation_generator.execute(state.get("results", []))
+    lines = []
+    for item in cited:
+        lines.append(item.get("reference", item.get("title", "")))
+        for passage in item.get("metadata", {}).get("passages", []):
+            lines.append(f"  {passage.get('citation', '')} {passage.get('text', '')}")
+    if lines:
+        log_section("CITATIONS & EXTRACTED PASSAGES", "\n".join(lines))
+    return {"results": cited}
 
 
 async def synthesizer_node(state: ResearchState) -> dict:
@@ -207,6 +276,7 @@ async def synthesizer_node(state: ResearchState) -> dict:
             state.get("query", ""),
             state.get("results", []),
         )
+        log_section("SYNTHESIZER OUTPUT", synthesized_text)
         return {"synthesized_text": synthesized_text}
     except Exception as exc:
         if previous:
@@ -246,19 +316,27 @@ async def reflect_node(state: ResearchState) -> dict:
     stop = {"research_log": log, "continue_research": False}
 
     if state.get("status") in STOPPED or current_round >= settings.max_research_rounds:
+        log_section(f"REFLECT (Round {current_round})", f"STOP (round={current_round}, status={state.get('status')})\nGaps:\n{gaps or 'None'}")
         return stop
     if current_round > 1 and not state.get("new_evidence_count"):
+        log_section(f"REFLECT (Round {current_round})", "STOP (no new evidence in follow-up round)")
         return stop
     if not gaps:
+        log_section(f"REFLECT (Round {current_round})", "STOP (no gaps identified)")
         return stop
 
     previous_queries = state.get("sub_questions", [])
     routes = await planner.create_followup_queries(state.get("query", ""), gaps, previous_queries)
     new_queries = _flatten(routes)
     if not new_queries:
+        log_section(f"REFLECT (Round {current_round})", f"STOP (planner returned no follow-up queries)\nGaps:\n{gaps}")
         return stop
 
     logger.info("Round %s gaps -> follow-up queries: %s", current_round, new_queries)
+    log_section(
+        f"REFLECT (Round {current_round}) -> LOOPING TO ROUND {current_round + 1}",
+        f"Gaps:\n{gaps}\n\nFollow-up routes:\n{format_json(routes)}",
+    )
     return {
         "research_log": log,
         "continue_research": True,
@@ -272,45 +350,12 @@ def reflect_route(state: ResearchState) -> str:
     return "continue" if state.get("continue_research") else "done"
 
 
-def _format_references(results: list[ToolResult], cited: set[int] | None = None) -> str:
-    return "\n".join(
-        f"- {item.get('reference', '')}"
-        for index, item in enumerate(results, start=1)
-        if item.get("reference") and (not cited or index in cited)
-    )
-
-
-def _cited_source_indices(report: str) -> set[int]:
-    return {int(match.group(1)) for match in CITATION_PATTERN.finditer(report)}
-
-
-def _remove_unknown_citations(report: str, results: list[ToolResult]) -> str:
-    """Drop citation markers like [7] or [7.2] that point to no real source/passage."""
-    valid: set[str] = set()
-    for source_index, item in enumerate(results, start=1):
-        valid.add(str(source_index))
-        for passage in item.get("metadata", {}).get("passages", []):
-            if passage.get("passage_id"):
-                valid.add(passage["passage_id"])
-
-    def replace(match: re.Match) -> str:
-        key = match.group(1) if match.group(2) is None else f"{match.group(1)}.{match.group(2)}"
-        return match.group(0) if key in valid else ""
-
-    return CITATION_PATTERN.sub(replace, report)
-
-
-def _add_references_to_report(report: str, references: str) -> str:
-    report = re.split(r"(?im)^# References\s*$", report, maxsplit=1)[0].rstrip()
-    return f"{report}\n\n# References\n{references}".strip()
-
-
 async def writer_node(state: ResearchState) -> dict:
     logger.info("NODE -> writer")
     if state.get("status") in STOPPED:
         return {}
     results = state.get("results", [])
-    references = _format_references(results)
+    references = citation_generator.format_references(results)
     try:
         report = await writer.generate_report(
             state.get("query", ""),
@@ -320,10 +365,12 @@ async def writer_node(state: ResearchState) -> dict:
     except Exception as exc:
         return {"status": "failed", "fatal_error": str(exc)}
 
-    report = _remove_unknown_citations(report, results)
-    cited_references = _format_references(results, _cited_source_indices(report))
+    final_report, had_unknown = citation_generator.finalize_report(report, results)
+    if had_unknown:
+        logger.info("Removed unknown citation markers not present in validated results.")
+    log_section("FINAL REPORT", final_report)
     return {
-        "report": _add_references_to_report(report, cited_references),
+        "report": final_report,
         "status": "completed",
     }
 

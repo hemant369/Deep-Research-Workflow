@@ -91,6 +91,7 @@ class PlannerAgent:
         query: str,
         feedback: str | None = None,
         previous_plan: dict | None = None,
+        config: dict | None = None,
     ) -> dict:
         """Draft (or revise) a research plan for the user to review.
 
@@ -121,7 +122,7 @@ Include at least one "web" step. End with a step that cross-checks claims or loo
 Return only JSON:
 {{"title": "short title (under 80 characters)", "steps": [{{"text": "...", "source": "academic|web|code"}}]}}
 """
-        response = await llm.ainvoke(prompt)
+        response = await llm.ainvoke(prompt, config=config)
         try:
             return _normalize_plan(_load_json(str(response.content)), query)
         except Exception:

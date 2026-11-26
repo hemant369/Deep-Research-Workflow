@@ -1,18 +1,7 @@
 from typing_extensions import TypedDict
+
+from schemas.research import ResearchPlanDict, ResearchRound, SearchError
 from schemas.tool_result import ToolResult
-
-
-class SearchError(TypedDict):
-    provider: str
-    query: str
-    message: str
-
-
-class ResearchRound(TypedDict):
-    round: int
-    queries: list[str]
-    new_sources: int
-    gaps: str
 
 
 class ResearchState(TypedDict, total=False):
@@ -22,7 +11,7 @@ class ResearchState(TypedDict, total=False):
     fatal_error: str
 
     routes: dict[str, list[str]]
-    plan: dict
+    plan: ResearchPlanDict
     sub_questions: list[str]
 
     academic_questions: list[str]
